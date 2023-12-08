@@ -2100,47 +2100,29 @@ static const char *dmi_slot_type(u8 code)
 	return out_of_spec;
 }
 
-/* If hide_unknown is set, return NULL instead of "Other" or "Unknown" */
-static const char *dmi_slot_bus_width(u8 code, int hide_unknown)
+static const char *dmi_slot_bus_width(u8 code)
 {
 	/* 7.10.2 */
 	static const char *width[] = {
 		"Other", /* 0x01 */
 		"Unknown",
-		"8-bit",
-		"16-bit",
-		"32-bit",
-		"64-bit",
-		"128-bit",
-		"x1",
-		"x2",
-		"x4",
-		"x8",
-		"x12",
-		"x16",
-		"x32" /* 0x0E */
+		"8 bit",
+		"16 bit",
+		"32 bit",
+		"64 bit",
+		"128 bit",
+		"1x or x1",
+		"2x or x2",
+		"4x or x4",
+		"8x or x8",
+		"12x or x12",
+		"16x or x16",
+		"32x or x32" /* 0x0E */
 	};
 
 	if (code >= 0x01 && code <= 0x0E)
-	{
-		if (code <= 0x02 && hide_unknown)
-			return NULL;
 		return width[code - 0x01];
-	}
 	return out_of_spec;
-}
-
-static void dmi_slot_type_with_width(u8 type, u8 width)
-{
-	const char *type_str, *width_str;
-
-	type_str = dmi_slot_type(type);
-	width_str = dmi_slot_bus_width(width, 1);
-
-	if (width_str)
-		pr_attr("Type", "%s %s", width_str, type_str);
-	else
-		pr_attr("Type", "%s", type_str);
 }
 
 static const char *dmi_slot_current_usage(u8 code)
@@ -2352,7 +2334,7 @@ static void dmi_slot_physical_width(u8 code)
 {
 	if (code)
 		pr_attr("Slot Physical Width", "%s",
-			dmi_slot_bus_width(code, 0));
+			dmi_slot_bus_width(code));
 }
 
 static void dmi_slot_pitch(u16 code)
@@ -4691,7 +4673,8 @@ static void dmi_decode(const struct dmi_header *h, u16 ver)
 			if (h->length < 0x0C) break;
 			pr_attr("Designation", "%s",
 				dmi_string(h, data[0x04]));
-			dmi_slot_type_with_width(data[0x05], data[0x06]);
+			pr_attr("Type", "%s", dmi_slot_type(data[0x05]));
+			pr_attr("Data Bus Width", "%s", dmi_slot_bus_width(data[0x06]));
 			pr_attr("Current Usage", "%s",
 				dmi_slot_current_usage(data[0x07]));
 			pr_attr("Length", "%s",
@@ -4704,7 +4687,7 @@ static void dmi_decode(const struct dmi_header *h, u16 ver)
 			if (h->length < 0x11) break;
 			dmi_slot_segment_bus_func(WORD(data + 0x0D), data[0x0F], data[0x10]);
 			if (h->length < 0x13) break;
-			pr_attr("Data Bus Width", "%u", data[0x11]);
+			pr_attr("Data Bus Width (Base)", "%u", data[0x11]);
 			pr_attr("Peer Devices", "%u", data[0x12]);
 			if (h->length < 0x13 + data[0x12] * 5) break;
 			dmi_slot_peers(data[0x12], data + 0x13);
