@@ -1453,10 +1453,18 @@ static const char *dmi_processor_upgrade(u8 code)
 		"Socket LGA1211",
 		"Socket LGA2422",
 		"Socket LGA5773",
-		"Socket BGA5773" /* 0x48 */
+		"Socket BGA5773",
+		"Socket AM5",
+		"Socket SP5",
+		"Socket SP6",
+		"Socket BGA883",
+		"Socket BGA1190",
+		"Socket BGA4129",
+		"Socket LGA4710",
+		"Socket LGA7529" /* 0x50 */
 	};
 
-	if (code >= 0x01 && code <= 0x48)
+	if (code >= 0x01 && code <= 0x50)
 		return upgrade[code - 0x01];
 	return out_of_spec;
 }
@@ -1977,14 +1985,16 @@ static const char *dmi_port_type(u8 code)
 		"Modem Port",
 		"Network Port",
 		"SATA",
-		"SAS" /* 0x21 */
+		"SAS",
+		"MFDP (Multi-Function Display Port)",
+		"Thunderbolt" /* 0x23 */
 	};
 	static const char *type_0xA0[] = {
 		"8251 Compatible", /* 0xA0 */
 		"8251 FIFO Compatible" /* 0xA1 */
 	};
 
-	if (code <= 0x21)
+	if (code <= 0x23)
 		return type[code];
 	if (code >= 0xA0 && code <= 0xA1)
 		return type_0xA0[code - 0xA0];
