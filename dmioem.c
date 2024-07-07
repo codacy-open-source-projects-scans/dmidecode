@@ -38,6 +38,7 @@ enum DMI_VENDORS
 {
 	VENDOR_UNKNOWN,
 	VENDOR_ACER,
+	VENDOR_DELL,
 	VENDOR_HP,
 	VENDOR_HPE,
 	VENDOR_IBM,
@@ -56,6 +57,8 @@ void dmi_set_vendor(const char *v, const char *p)
 {
 	const struct { const char *str; enum DMI_VENDORS id; } vendor[] = {
 		{ "Acer",			VENDOR_ACER },
+		{ "Dell Computer Corporation",	VENDOR_DELL },
+		{ "Dell Inc.",			VENDOR_DELL },
 		{ "HP",				VENDOR_HP },
 		{ "Hewlett-Packard",		VENDOR_HP },
 		{ "HPE",			VENDOR_HPE },
@@ -126,6 +129,70 @@ static int dmi_decode_acer(const struct dmi_header *h)
 		default:
 			return 0;
 	}
+	return 1;
+}
+
+/*
+ * Dell-specific data structures are decoded here.
+ */
+
+static void dmi_dell_bios_flags(u64 flags)
+{
+	/*
+	 * TODO: The meaning of the other bits is unknown.
+	 */
+	pr_attr("ACPI WMI Supported", "%s", (flags.l & (1 << 1)) ? "Yes" : "No");
+}
+
+static void dmi_dell_token_interface(const struct dmi_header *h)
+{
+	int tokens = (h->length - 0x0B) / 0x06;
+	u8 *data = h->data;
+	u8 *token;
+
+	pr_attr("Command I/O Address", "0x%04x", WORD(data + 0x04));
+	pr_attr("Command I/O Code", "0x%02x", data[0x06]);
+	pr_attr("Supported Command Classes Bitmap", "0x%08x", DWORD(data + 0x07));
+
+	/*
+	 * Final token is a terminator, so we ignore it.
+	 */
+	if (tokens <= 1)
+		return;
+
+	pr_list_start("Tokens", NULL);
+	for (int i = 0; i < tokens - 1; i++)
+	{
+		token = data + 0x0B + 0x06 * i;
+		pr_list_item("0x%04hx (location 0x%04hx, value 0x%04hx)",
+			     WORD(token + 0x00), WORD(token + 0x02),
+			     WORD(token + 0x04));
+	}
+	pr_list_end();
+}
+
+static int dmi_decode_dell(const struct dmi_header *h)
+{
+	u8 *data = h->data;
+
+	switch (h->type)
+	{
+		case 177:
+			pr_handle_name("Dell BIOS Flags");
+			if (h->length < 0x0C) break;
+			dmi_dell_bios_flags(QWORD(data + 0x04));
+			break;
+
+		case 218:
+			pr_handle_name("Dell Token Interface");
+			if (h->length < 0x0B) break;
+			dmi_dell_token_interface(h);
+			break;
+
+		default:
+			return 0;
+	}
+
 	return 1;
 }
 
@@ -261,7 +328,8 @@ static void dmi_hp_203_devtyp(const char *fname, unsigned int code)
 		"Dynamic Smart Array Controller",
 		"File",
 		"NVME Hard Drive",
-		"NVDIMM" /* 0x11 */
+		"NVDIMM", /* 0x11 */
+		"Embedded GPU"
 	};
 
 	if (code < ARRAY_SIZE(type))
@@ -545,6 +613,7 @@ static void dmi_hp_224_chipid(u16 code)
 		"Nationz TPM",
 		"STMicroGen10 Plus TPM",
 		"STMicroGen11 TPM", /* 0x05 */
+		"STMicroGen12 TPM",
 	};
 	if ((code & 0xff) < ARRAY_SIZE(chipid))
 		str = chipid[code & 0xff];
@@ -1708,6 +1777,8 @@ int dmi_decode_oem(const struct dmi_header *h)
 			return dmi_decode_hp(h);
 		case VENDOR_ACER:
 			return dmi_decode_acer(h);
+		case VENDOR_DELL:
+			return dmi_decode_dell(h);
 		case VENDOR_IBM:
 		case VENDOR_LENOVO:
 			return dmi_decode_ibm_lenovo(h);
