@@ -1011,10 +1011,10 @@ static void dmi_hp_245_pcie_mhs_riser(const struct dmi_header *h)
 	pr_list_end();
 }
 
-static int dmi_decode_hp(const struct dmi_header *h)
+static int dmi_decode_hp(const struct dmi_header *h, u16 ver)
 {
 	u8 *data = h->data;
-	int nic, ptr;
+	int nic, ptr, i;
 	u32 feat;
 	const char *company = (dmi_vendor == VENDOR_HP) ? "HP" : "HPE";
 	int gen;
@@ -1075,6 +1075,37 @@ static int dmi_decode_hp(const struct dmi_header *h)
 			pr_attr("Parallel Port", "%s", feat & (1 << 2) ? "Enabled" : "Disabled");
 			pr_attr("Floppy Disk Port", "%s", feat & (1 << 3) ? "Enabled" : "Disabled");
 			pr_attr("Virtual Serial Port", "%s", feat & (1 << 4) ? "Enabled" : "Disabled");
+			break;
+
+		case 195:
+			/*
+			 * Vendor Specific: Server System ID
+			 *
+			 * Offset |  Name      | Width | Description
+			 * ----------------------------------------------
+			 *  0x00  | Type       | BYTE  | 0xC3, Server System ID
+			 *  0x01  | Length     | BYTE  | Length of structure
+			 *  0x02  | Handle     | WORD  | Unique handle
+			 *  0x04  | System ID  | STRING| Server System ID
+			 *  0x05  | Platform ID| BYTE  | Low byte of Platform ID from XREG in CPLD
+			 *  0x06  | Platform ID| BYTE  | High byte of Platform ID from XREG in CPLD
+			 *  0x07  | GUID       |16 BYTE| RESERVED: Deprecated Gen 11 and later.
+			 *
+			 * This structure exists to define a unique system ID that replaces the
+			 * old system EISA ID. It is to be used in systems where the system
+			 * EISA ID port is not present.
+			 *
+			 * It also exposes the Platform ID from the CPLD Xregister. This value is
+			 * used by iLO to identify the platform and will be used for identification
+			 * and matching of certain flash deliverables.
+			 */
+
+			pr_handle_name("%s ProLiant Server System ID", company);
+			if (h->length < 0x05) break;
+			pr_attr("Server System ID", "%s", dmi_string(h, data[0x04]));
+			if (h->length < 0x07) break;
+			/* Display byte order is uncertain, to be confirmed */
+			pr_attr("Platform ID", "%d:%d", data[0x05], data[0x06]);
 			break;
 
 		case 197:
@@ -1411,6 +1442,55 @@ static int dmi_decode_hp(const struct dmi_header *h)
 			}
 			break;
 
+		case 211:
+			/*
+			 * Vendor Specific: HPE ProLiant Processor TControl Information
+			 *
+			 * Provides information about the Tcontrol value for each installed
+			 * processor.  This information is utilized to optimize the thermal fan
+			 * control systems on the system. For some systems, this can be handled
+			 * totally by the System ROM (systems with 7463 fan controllers). For
+			 * systems that utilize TAFI, the Health Driver handles fan control.
+			 * The Health Driver must know the value for Tcontrol for all processors
+			 * to be able to customize the fan control for the installed processors.
+			 *
+			 * Tcontrol is a value programmed into each processor by Intel that
+			 * indicates the processors thermal properties.  The value is based on
+			 * how "leaky" the particular processor's transistors are.  A more "leaky"
+			 * processor will get hotter for a given power input and thus will have a
+			 * higher Tcontrol value. Intel officially suggests keeping a processor
+			 * below the Tcontrol value for reliability reasons. HP is using Tcontrol
+			 * as the point at which we begin spinning up the fans.
+			 *
+			 * Software must check the corresponding Record Type 4 to determine if the
+			 * processor is installed. If the processor is not installed, the
+			 * corresponding Record Type 211 should not be utilized. Record Type 197
+			 * must be used to correlate Type 211 Record to the processor's APIC ID.
+			 * This must be done to know which TAFI controller must be programmed with
+			 * a particular Tcontrol value. Type 197 Record has an identifier which
+			 * relates it to a Type 4 Record, so it is possible to correlate a
+			 * Type 211 Record with a Type 197 Record.
+			 *
+			 * Offset |  Name  | Width | Description
+			 * -------------------------------------
+			 *  0x00  |  Type  | BYTE  | 0xD3, TControl Info
+			 *  0x01  | Length | BYTE  | Length of structure
+			 *  0x02  | Handle | WORD  | Unique handle
+			 *  0x04  | Handle | WORD  | Handle of Corresponding Type 4 Processor Record
+			 *  0x06  |Tcontrol| BYTE  | Processor Tcontrol Value. 00 -> Value N/A.
+			 */
+
+			pr_handle_name("%s ProLiant TControl Information", company);
+			if (h->length < 0x07) break;
+			if (!(opt.flags & FLAG_QUIET))
+				pr_attr("Associated Processor Handle", "0x%04X",
+					WORD(data + 0x04));
+			if (data[0x06])
+				pr_attr("TControl Value", "%d", data[0x06]);
+			else
+				pr_attr("TControl Value", "%s", "N/A");
+			break;
+
 		case 212:
 			/*
 			 * Vendor Specific: HPE 64-bit CRU Information
@@ -1527,6 +1607,90 @@ static int dmi_decode_hp(const struct dmi_header *h)
 				pr_attr("Associated Handle", "0x%04X", WORD(data + 0x8));
 			if (h->length < 0x0c) break;
 			dmi_hp_224_chipid(WORD(data + 0x0a));
+			break;
+
+		case 226:
+			/*
+			 * Vendor Specific: Physical Attribute Information
+			 *
+			 * This structure exists to store physical attributes for which virtual
+			 * attributes have been stored in the industry standard SMBIOS fields
+			 * which would normally store these physical attributes. This OEM SMBIOS
+			 * Record was initially defined for the SYNERGY project where it was
+			 * required that a virtual serial number and UUID be applied to the
+			 * system. These virtual values must be stored in the standard SMBIOS
+			 * fields so that industry standard software would detect these virtual
+			 * values, allowing a workload to transition from one physical piece of
+			 * hardware to another. This Record was created because a place was needed
+			 * to store the physical attributes (serial number and UUID) for use in
+			 * asset tracking and warranty events.
+			 *
+			 * Offset |  Name  | Width | Description
+			 * -------------------------------------
+			 *  0x00  | Type   | BYTE  | 0xE2, Physical Attribute
+			 *  0x01  | Length | BYTE  | Length of structure
+			 *  0x02  | Handle | WORD  | Unique handle
+			 *  0x04  | UUID   |16 BYTE| if !0 => Physical Universal Unique ID Number
+			 *  0x14  |  SN    | STRING| Physical Serial Number. Match Record Type 1
+			 */
+			pr_handle_name("%s Physical Attribute Information", company);
+			if (h->length < 0x15) break;
+			if (QWORD(data + 0x0C) || QWORD(data + 0x04))
+				dmi_system_uuid(pr_attr, "UUID", data + 0x04, ver);
+			pr_attr("Serial Number", "%s", dmi_string(h, data[0x14]));
+			break;
+
+		case 229:
+			/*
+			 * Vendor Specific: Reserved Memory Location
+			 *
+			 * This OEM SMBIOS Record is used to communicate the physical address
+			 * location of memory regions reserved during POST by System Firmware.
+			 * These memory regions will be reserved for various purposes. It is
+			 * intended that this OEM SMBIOS Record be expandable to support any
+			 * future POST reserved memory requirements.  The regions reserved by
+			 * POST will typically be reported by INT15h E820h as reserved memory.
+			 * This record was initially defined to communicate to iLO FW and Smart
+			 * Array Storage FW the location of a memory buffer reserved for passing
+			 * information between the Smart Array Controller and iLO FW for providing
+			 * hard drive temperatures to iLO FW fan control.
+			 *
+			 * Note: Multiple Type 229 Records may exist in the SMBIOS Table because
+			 * each SMBIOS Record has a maximum length of 256 bytes and it is possible
+			 * that there eventually would be enough reserved memory locations such
+			 * that a single record could exceed this limit (each reserved memory
+			 * location utilizes 16 bytes). Software utilizing the Type 229 Record
+			 * should be written to handle the possibility of multiple records.
+			 *
+			 * Offset| Name        | Width | Description
+			 * -----------------------------------------
+			 *  0x00 | Type        | BYTE  | 0xE5, Reserved Memory Location
+			 *  0x01 | Length      | BYTE  | Length of structure
+			 *  0x02 | Handle      | WORD  | Unique handle
+			 *  0x04 | Signature   | DWORD | Enumerated value that indicates the type
+			 *                             | of memory described by this Reserved
+			 *                             | Memory Location
+			 *  0x08 | Phys Addr   | QWORD | 64-Bit physical memory address
+			 *  0x10 | Size of Loc | DWORD | Bit[30:0] - Size of the Memory Location
+			 *                             | Bit[31] - Indicates whether the size field in
+			 *                             | Bits[30:0] is in 1 byte or 1 Kbyte granularity
+			 *                             | 0 = Byte Granularity
+			 *                             | 1 = Kbyte Granularity
+			 *  0x14 | Mem Entries         | 16 Bytes per Reserved Memory Entry
+			 */
+			pr_handle_name("%s Reserved Memory Location", company);
+			for (ptr = 0x04, i = 1; ptr + 16 <= h->length; ptr += 16, i++)
+			{
+				pr_attr("Memory Location", "%d", i);
+				pr_subattr("Signature",
+					   "%.4s", data + ptr);
+				pr_subattr("Physical Address", "0x%016llX",
+					   QWORD(data + ptr + 0x04));
+				feat = DWORD(data + ptr + 0x0C);
+				dmi_print_memory_size(pr_subattr, "Size",
+						      feat & 0x7fffffff,
+						      feat >> 31);
+			}
 			break;
 
 		case 230:
@@ -1845,7 +2009,7 @@ static int dmi_decode_hp(const struct dmi_header *h)
 			pr_attr("Version String", "%s", dmi_string(h, data[0x0A]));
 
 			if (DWORD(data + 0x0B))
-				dmi_print_memory_size("Image Size", QWORD(data + 0xB), 0);
+				dmi_print_memory_size(pr_attr, "Image Size", QWORD(data + 0xB), 0);
 			else
 				pr_attr("Image Size", "Not Available");
 
@@ -1992,7 +2156,7 @@ static int dmi_decode_hp(const struct dmi_header *h)
 							  ((feat >> 1) & 0x01) ? "Byte Accessible" :
 							  ((feat >> 2) & 0x01) ? "Block I/O" :
 							  "Reserved");
-			dmi_print_memory_size("Size", QWORD(data + 0x09), 2);
+			dmi_print_memory_size(pr_attr, "Size", QWORD(data + 0x09), 2);
 			pr_attr("Passphrase Enabled", "%s", data[0x11] ? "Yes" : "No");
 			feat = WORD(data + 0x12);
 			if (feat)
@@ -2181,13 +2345,13 @@ static int dmi_decode_ibm_lenovo(const struct dmi_header *h)
  * Dispatch vendor-specific entries decoding
  * Return 1 if decoding was successful, 0 otherwise
  */
-int dmi_decode_oem(const struct dmi_header *h)
+int dmi_decode_oem(const struct dmi_header *h, u16 ver)
 {
 	switch (dmi_vendor)
 	{
 		case VENDOR_HP:
 		case VENDOR_HPE:
-			return dmi_decode_hp(h);
+			return dmi_decode_hp(h, ver);
 		case VENDOR_ACER:
 			return dmi_decode_acer(h);
 		case VENDOR_DELL:
