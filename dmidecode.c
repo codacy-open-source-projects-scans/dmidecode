@@ -89,7 +89,7 @@ static const char *bad_index = "<BAD INDEX>";
 
 enum cpuid_type cpuid_type = cpuid_none;
 
-#define SUPPORTED_SMBIOS_VER 0x030800
+#define SUPPORTED_SMBIOS_VER 0x030900
 
 #define FLAG_NO_FILE_OFFSET     (1 << 0)
 #define FLAG_STOP_AT_EOT        (1 << 1)
@@ -647,10 +647,10 @@ static const char *dmi_chassis_type(u8 code)
 		"Rack Mount Chassis",
 		"Sealed-case PC",
 		"Multi-system",
-		"CompactPCI",
-		"AdvancedTCA",
+		"Compact PCI",
+		"Advanced TCA",
 		"Blade",
-		"Blade Enclosing",
+		"Blade Enclosure",
 		"Tablet",
 		"Convertible",
 		"Detachable",
@@ -749,6 +749,18 @@ static void dmi_chassis_elements(u8 count, u8 len, const u8 *p)
 		}
 	}
 	pr_list_end();
+}
+
+static const char *dmi_chassis_rack_type(u8 code)
+{
+	static const char *type[] = {
+		"Unspecified", /* 0x00 */
+		"OU" /* 0x01 */
+	};
+
+	if (code <= 0x01)
+		return type[code];
+	return out_of_spec;
 }
 
 /*
@@ -2051,7 +2063,7 @@ static const char *dmi_port_type(u8 code)
  * 7.10 System Slots (Type 9)
  */
 
-static const char *dmi_slot_type(u8 code)
+static void dmi_slot_type(u8 code, u8 length)
 {
 	/* 7.10.1 */
 	static const char *type[] = {
@@ -2144,14 +2156,35 @@ static const char *dmi_slot_type(u8 code)
 	 * Note to developers: when adding entries to these lists, check if
 	 * function dmi_slot_id below needs updating too.
 	 */
+	const char *t, *suffix = "";
 
 	if (code >= 0x01 && code <= 0x28)
-		return type[code - 0x01];
-	if (code == 0x30)
-		return type_0x30[code - 0x30];
-	if (code >= 0xA0 && code <= 0xC6)
-		return type_0xA0[code - 0xA0];
-	return out_of_spec;
+		t = type[code - 0x01];
+	else if (code == 0x30)
+		t = type_0x30[code - 0x30];
+	else if (code >= 0xA0 && code <= 0xC6)
+		t = type_0xA0[code - 0xA0];
+	else
+		t = out_of_spec;
+
+	/* For EDSFF slots, add the length suffix */
+	switch (code)
+	{
+		case 0xC5: /* EDSFF E1 */
+		case 0xC6: /* EDSFF E3 */
+			switch (length)
+			{
+				case 0x03: /* Short */
+					suffix = ".S";
+					break;
+				case 0x04: /* Long */
+					suffix = ".L";
+					break;
+			}
+			break;
+	}
+
+	pr_attr("Type", "%s%s", t, suffix);
 }
 
 static const char *dmi_slot_bus_width(u8 code)
@@ -2230,11 +2263,20 @@ static void dmi_slot_id(u8 code1, u8 code2, u8 type)
 		case 0x11: /* AGP */
 		case 0x12: /* PCI-X */
 		case 0x13: /* AGP */
-		case 0x1F: /* PCI Express 2 */
-		case 0x20: /* PCI Express 3 */
+		case 0x14: /* M.2 */
+		case 0x15: /* M.2 */
+		case 0x16: /* M.2 */
+		case 0x17: /* M.2 */
+		case 0x1F: /* PCI Express 2 (U.2) */
+		case 0x20: /* PCI Express 3 (U.2) */
 		case 0x21: /* PCI Express Mini */
 		case 0x22: /* PCI Express Mini */
 		case 0x23: /* PCI Express Mini */
+		case 0x24: /* PCI Express 4 (U.2) */
+		case 0x25: /* PCI Express 5 (U.2) */
+		case 0x26: /* OCP */
+		case 0x27: /* OCP */
+		case 0x28: /* OCP */
 		case 0xA5: /* PCI Express */
 		case 0xA6: /* PCI Express */
 		case 0xA7: /* PCI Express */
@@ -2266,6 +2308,8 @@ static void dmi_slot_id(u8 code1, u8 code2, u8 type)
 		case 0xC2: /* PCI Express 5 */
 		case 0xC3: /* PCI Express 5 */
 		case 0xC4: /* PCI Express 6+ */
+		case 0xC5: /* EDSFF */
+		case 0xC6: /* EDSFF */
 			pr_attr("ID", "%u", code1);
 			break;
 		case 0x07: /* PCMCIA */
@@ -2845,10 +2889,13 @@ static const char *dmi_memory_device_form_factor(u8 code)
 		"SODIMM",
 		"SRIMM",
 		"FB-DIMM",
-		"Die" /* 0x10 */
+		"Die",
+		"CAMM",
+		"CUDIMM",
+		"CSODIMM" /* 0x13 */
 	};
 
-	if (code >= 0x01 && code <= 0x10)
+	if (code >= 0x01 && code <= 0x13)
 		return form_factor[code - 0x01];
 	return out_of_spec;
 }
@@ -2902,10 +2949,11 @@ static const char *dmi_memory_device_type(u8 code)
 		"HBM2",
 		"DDR5",
 		"LPDDR5",
-		"HBM3" /* 0x24 */
+		"HBM3",
+		"MRDIMM" /* 0x25 */
 	};
 
-	if (code >= 0x01 && code <= 0x24)
+	if (code >= 0x01 && code <= 0x25)
 		return type[code - 0x01];
 	return out_of_spec;
 }
@@ -2965,7 +3013,7 @@ static void dmi_memory_device_speed(const char *attr, u16 code1, u32 code2)
 	}
 }
 
-static void dmi_memory_technology(u8 code)
+static const char *dmi_memory_technology(u8 code)
 {
 	/* 7.18.6 */
 	static const char * const technology[] = {
@@ -2975,12 +3023,12 @@ static void dmi_memory_technology(u8 code)
 		"NVDIMM-N",
 		"NVDIMM-F",
 		"NVDIMM-P",
-		"Intel Optane DC persistent memory" /* 0x07 */
+		"Intel Optane persistent memory",
+		"MRDIMM" /* 0x08 */
 	};
-	if (code >= 0x01 && code <= 0x07)
-		pr_attr("Memory Technology", "%s", technology[code - 0x01]);
-	else
-		pr_attr("Memory Technology", "%s", out_of_spec);
+	if (code >= 0x01 && code <= 0x08)
+		return technology[code - 0x01];
+	return out_of_spec;
 }
 
 static void dmi_memory_operating_mode_capability(u16 code)
@@ -4598,14 +4646,32 @@ static void dmi_decode(const struct dmi_header *h, u16 ver)
 			pr_attr("OEM Information", "0x%08X",
 				DWORD(data + 0x0D));
 			if (h->length < 0x13) break;
-			dmi_chassis_height(data[0x11]);
+			if (data[0x11] != 0xFF)
+				dmi_chassis_height(data[0x11]);
 			dmi_chassis_power_cords(data[0x12]);
 			if (h->length < 0x15) break;
 			if (h->length < 0x15 + data[0x13] * data[0x14]) break;
 			dmi_chassis_elements(data[0x13], data[0x14], data + 0x15);
 			if (h->length < 0x16 + data[0x13] * data[0x14]) break;
-			pr_attr("SKU Number", "%s",
-				dmi_string(h, data[0x15 + data[0x13] * data[0x14]]));
+			/*
+			 * Many old implementations have stray zero bytes at
+			 * the end of this record, probably due to some
+			 * confusion regarding the preceding variable length
+			 * section. Only decode the following fields if they
+			 * are defined in the SMBIOS specification version
+			 * which is implemented.
+			 */
+			if (ver >= 0x0207)
+				pr_attr("SKU Number", "%s",
+					dmi_string(h, data[0x15 + data[0x13] * data[0x14]]));
+			if (h->length < 0x18 + data[0x13] * data[0x14]) break;
+			if (ver >= 0x0309)
+			{
+				pr_attr("Rack Type", "%s",
+					dmi_chassis_rack_type(data[0x16 + data[0x13] * data[0x14]]));
+				pr_attr("Rack Height", "%hhu",
+					data[0x17 + data[0x13] * data[0x14]]);
+			}
 			break;
 
 		case 4: /* 7.5 Processor Information */
@@ -4768,7 +4834,7 @@ static void dmi_decode(const struct dmi_header *h, u16 ver)
 			if (h->length < 0x0C) break;
 			pr_attr("Designation", "%s",
 				dmi_string(h, data[0x04]));
-			pr_attr("Type", "%s", dmi_slot_type(data[0x05]));
+			dmi_slot_type(data[0x05], data[0x08]);
 			pr_attr("Data Bus Width", "%s", dmi_slot_bus_width(data[0x06]));
 			pr_attr("Current Usage", "%s",
 				dmi_slot_current_usage(data[0x07]));
@@ -4954,7 +5020,8 @@ static void dmi_decode(const struct dmi_header *h, u16 ver)
 			dmi_memory_voltage_value("Configured Voltage",
 						 WORD(data + 0x26));
 			if (h->length < 0x34) break;
-			dmi_memory_technology(data[0x28]);
+			pr_attr("Memory Technology", "%s",
+				dmi_memory_technology(data[0x28]));
 			dmi_memory_operating_mode_capability(WORD(data + 0x29));
 			pr_attr("Firmware Version", "%s",
 				dmi_string(h, data[0x2B]));
