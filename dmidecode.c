@@ -2423,6 +2423,8 @@ static void dmi_slot_information(u8 type, u8 code)
 		case 0xC2: /* PCI Express 5 */
 		case 0xC3: /* PCI Express 5 */
 		case 0xC4: /* PCI Express 6+ */
+		case 0xC5: /* EDSFF E1 */
+		case 0xC6: /* EDSFF E3 */
 			if (code)
 				pr_attr("PCI Express Generation", "%u", code);
 			break;
